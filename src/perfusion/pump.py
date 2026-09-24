@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 FULL_STEPS = 200
 MAX_FLOW_UL_PER_MIN = 2000.0
+MAX_RUN_SECONDS = 86400.0
 
 
 class PumpError(ValueError):
@@ -18,24 +19,26 @@ class PumpError(ValueError):
 
 
 def volume_ul_per_revolution(diameter_mm: float, pitch_mm: float) -> float:
-    if diameter_mm <= 0 or pitch_mm <= 0:
-        raise PumpError("diameter and pitch must be positive")
+    if not all(math.isfinite(v) and v > 0 for v in (diameter_mm, pitch_mm)):
+        raise PumpError("diameter and pitch must be finite and positive")
     if not 1.0 <= diameter_mm <= 40.0:
         raise PumpError("diameter looks like the wrong unit or the wrong syringe")
     radius = diameter_mm / 2.0
     return math.pi * radius * radius * pitch_mm
 
 
-def diameter_from_water_mass(mass_mg: float, travel_mm: float) -> float:
-    """1 mg of water is 1 µL. Measure a real extrusion; do not trust a catalog ID."""
-    if mass_mg <= 0 or travel_mm <= 0:
-        raise PumpError("calibration inputs must be positive")
-    radius = math.sqrt(mass_mg / (math.pi * travel_mm))
+def diameter_from_water_mass(mass_mg: float, travel_mm: float, *, density_mg_ul: float = 1.0) -> float:
+    """Infer effective diameter. Default density 1 mg/µL is an approximation."""
+    if not all(math.isfinite(v) and v > 0 for v in (mass_mg, travel_mm, density_mg_ul)):
+        raise PumpError("calibration inputs must be finite and positive")
+    radius = math.sqrt((mass_mg / density_mg_ul) / (math.pi * travel_mm))
     return 2.0 * radius
 
 
 def steps_for_volume(volume_ul: float, diameter_mm: float, pitch_mm: float, microsteps: int = 16) -> float:
-    if microsteps not in {1, 2, 4, 8, 16}:
+    if not math.isfinite(volume_ul):
+        raise PumpError("volume must be finite")
+    if isinstance(microsteps, bool) or microsteps not in {1, 2, 4, 8, 16}:
         raise PumpError("microsteps must be 1, 2, 4, 8, or 16")
     per_rev = volume_ul_per_revolution(diameter_mm, pitch_mm)
     return volume_ul / per_rev * FULL_STEPS * microsteps
@@ -47,9 +50,9 @@ class Segment:
     flow_ul_per_min: float
 
     def __post_init__(self):
-        if self.duration_s <= 0:
-            raise PumpError("duration must be positive")
-        if abs(self.flow_ul_per_min) > MAX_FLOW_UL_PER_MIN:
+        if not math.isfinite(self.duration_s) or not 0 < self.duration_s <= MAX_RUN_SECONDS:
+            raise PumpError("duration must be finite, positive and at most 86400 seconds")
+        if not math.isfinite(self.flow_ul_per_min) or abs(self.flow_ul_per_min) > MAX_FLOW_UL_PER_MIN:
             raise PumpError(
                 f"flow {self.flow_ul_per_min} µL/min exceeds the {MAX_FLOW_UL_PER_MIN:g} µL/min cap"
             )
@@ -62,7 +65,7 @@ def delivered_ul(segments: list[Segment]) -> float:
 def encode(diameter_mm: float, pitch_mm: float, microsteps: int, segments: list[Segment]) -> str:
     # touch the helpers so a bad diameter fails before a script is sent
     volume_ul_per_revolution(diameter_mm, pitch_mm)
-    if microsteps not in {1, 2, 4, 8, 16}:
+    if isinstance(microsteps, bool) or microsteps not in {1, 2, 4, 8, 16}:
         raise PumpError("microsteps must be 1, 2, 4, 8, or 16")
     lines = [
         f"DIA {diameter_mm:.4f}",
@@ -70,10 +73,13 @@ def encode(diameter_mm: float, pitch_mm: float, microsteps: int, segments: list[
         f"MICRO {microsteps}",
     ]
     for segment in segments:
+        Segment(segment.duration_s, segment.flow_ul_per_min)
         lines.append(f"FLOW {segment.flow_ul_per_min:.4f}")
         lines.append(f"RUN {segment.duration_s:.3f}")
     lines.append("STOP")
-    return "\n".join(lines) + "\n"
+    script = "\n".join(lines) + "\n"
+    simulate(script)  # Reject values that round to an invalid wire representation.
+    return script
 
 
 def simulate(script: str) -> dict:
@@ -90,12 +96,26 @@ def simulate(script: str) -> dict:
             continue
         parts = line.split()
         op = parts[0].upper()
+        expected = 1 if op in {"STOP", "STATUS"} else 2
+        if len(parts) != expected:
+            raise PumpError(f"bad command arity: {line}")
+        if len(parts) == 2:
+            try:
+                value = float(parts[1])
+            except ValueError as exc:
+                raise PumpError(f"invalid number in {line}") from exc
+            if not math.isfinite(value):
+                raise PumpError(f"nonfinite number in {line}")
         if op == "DIA" and len(parts) == 2:
-            diameter = float(parts[1])
+            volume_ul_per_revolution(value, 1.0)
+            diameter = value
         elif op == "PITCH" and len(parts) == 2:
-            pitch = float(parts[1])
+            volume_ul_per_revolution(10.0, value)
+            pitch = value
         elif op == "MICRO" and len(parts) == 2:
-            micro = int(parts[1])
+            if value not in {1, 2, 4, 8, 16}:
+                raise PumpError("microsteps must be 1, 2, 4, 8, or 16")
+            micro = int(value)
         elif op == "FLOW" and len(parts) == 2:
             flow = float(parts[1])
             if abs(flow) > MAX_FLOW_UL_PER_MIN:
@@ -104,9 +124,12 @@ def simulate(script: str) -> dict:
             if None in (diameter, pitch, micro):
                 raise PumpError("DIA, PITCH, and MICRO are required before RUN")
             duration = float(parts[1])
+            Segment(duration, flow)
             delta = duration / 60.0 * flow
             volume += delta
             steps += steps_for_volume(delta, diameter, pitch, micro)
+            # Firmware clears FLOW when a RUN completes.
+            flow = 0.0
         elif op == "STOP":
             flow = 0.0
         elif op == "STATUS":

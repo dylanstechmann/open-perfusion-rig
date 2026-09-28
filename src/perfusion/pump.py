@@ -62,6 +62,102 @@ def delivered_ul(segments: list[Segment]) -> float:
     return sum(segment.duration_s / 60.0 * segment.flow_ul_per_min for segment in segments)
 
 
+def ramp_hold_ramp_profile(
+    flow_low: float,
+    flow_high: float,
+    ramp_up_s: float,
+    hold_s: float,
+    ramp_down_s: float,
+    ramp_steps: int = 5,
+) -> list[Segment]:
+    """Create a multi-segment ramp -> hold -> ramp flow profile."""
+    for val, name in [
+        (flow_low, "flow_low"), (flow_high, "flow_high"),
+        (ramp_up_s, "ramp_up_s"), (hold_s, "hold_s"), (ramp_down_s, "ramp_down_s"),
+    ]:
+        if not math.isfinite(val):
+            raise PumpError(f"{name} must be finite")
+    if ramp_up_s <= 0 or hold_s <= 0 or ramp_down_s <= 0:
+        raise PumpError("ramp and hold durations must be positive")
+    if isinstance(ramp_steps, bool) or not isinstance(ramp_steps, int) or ramp_steps < 1:
+        raise PumpError("ramp_steps must be a positive integer")
+    if abs(flow_low) > MAX_FLOW_UL_PER_MIN or abs(flow_high) > MAX_FLOW_UL_PER_MIN:
+        raise PumpError(f"flow exceeds {MAX_FLOW_UL_PER_MIN:g} µL/min cap")
+
+    segments: list[Segment] = []
+    # Ramp up: discretize into ramp_steps
+    step_dt_up = ramp_up_s / ramp_steps
+    for i in range(1, ramp_steps + 1):
+        flow = flow_low + (flow_high - flow_low) * (i / ramp_steps)
+        segments.append(Segment(duration_s=step_dt_up, flow_ul_per_min=flow))
+
+    # Hold at peak
+    segments.append(Segment(duration_s=hold_s, flow_ul_per_min=flow_high))
+
+    # Ramp down: discretize into ramp_steps
+    step_dt_down = ramp_down_s / ramp_steps
+    for i in range(1, ramp_steps + 1):
+        flow = flow_high - (flow_high - flow_low) * (i / ramp_steps)
+        segments.append(Segment(duration_s=step_dt_down, flow_ul_per_min=flow))
+
+    return segments
+
+
+def pulsatile_profile(
+    base_flow: float,
+    peak_flow: float,
+    cycle_s: float,
+    cycles: int,
+    duty_cycle: float = 0.5,
+) -> list[Segment]:
+    """Create a pulsatile flow profile with alternating peak and base flow phases."""
+    for val, name in [
+        (base_flow, "base_flow"), (peak_flow, "peak_flow"),
+        (cycle_s, "cycle_s"), (duty_cycle, "duty_cycle"),
+    ]:
+        if not math.isfinite(val):
+            raise PumpError(f"{name} must be finite")
+    if cycle_s <= 0:
+        raise PumpError("cycle duration must be positive")
+    if not (0.0 < duty_cycle < 1.0):
+        raise PumpError("duty_cycle must be strictly between 0 and 1")
+    if isinstance(cycles, bool) or not isinstance(cycles, int) or cycles < 1:
+        raise PumpError("cycles must be a positive integer")
+    if abs(base_flow) > MAX_FLOW_UL_PER_MIN or abs(peak_flow) > MAX_FLOW_UL_PER_MIN:
+        raise PumpError(f"flow exceeds {MAX_FLOW_UL_PER_MIN:g} µL/min cap")
+
+    peak_duration = cycle_s * duty_cycle
+    base_duration = cycle_s * (1.0 - duty_cycle)
+
+    segments: list[Segment] = []
+    for _ in range(cycles):
+        segments.append(Segment(duration_s=peak_duration, flow_ul_per_min=peak_flow))
+        segments.append(Segment(duration_s=base_duration, flow_ul_per_min=base_flow))
+
+    return segments
+
+
+def validate_firmware_commands(script: str) -> list[str]:
+    """Validate that every command in script strictly follows the firmware protocol."""
+    simulate(script)
+    valid_lines = []
+    for raw in script.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        op = parts[0].upper()
+        if op not in {"DIA", "PITCH", "MICRO", "FLOW", "RUN", "STOP", "STATUS"}:
+            raise PumpError(f"unknown firmware opcode: {op}")
+        if op in {"STOP", "STATUS"} and len(parts) != 1:
+            raise PumpError(f"firmware opcode {op} takes no arguments")
+        if op in {"DIA", "PITCH", "MICRO", "FLOW", "RUN"} and len(parts) != 2:
+            raise PumpError(f"firmware opcode {op} requires exactly one argument")
+        valid_lines.append(line)
+    return valid_lines
+
+
+
 def encode(diameter_mm: float, pitch_mm: float, microsteps: int, segments: list[Segment]) -> str:
     # touch the helpers so a bad diameter fails before a script is sent
     volume_ul_per_revolution(diameter_mm, pitch_mm)

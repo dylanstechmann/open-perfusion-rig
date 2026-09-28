@@ -18,12 +18,28 @@ Cylinder volume, inversion of that calibration, and that a script's integrated v
 
 ```bash
 make test
+
+# Constant flow profile
 PYTHONPATH=src python3 -m perfusion.cli \
   --diameter-mm 14.5 --pitch-mm 8 --microsteps 16 \
   --flow 50 --minutes 30
+
+# Multi-segment ramp -> hold -> ramp profile
+PYTHONPATH=src python3 -m perfusion.cli \
+  --diameter-mm 14.5 --pitch-mm 8 --microsteps 16 \
+  --profile ramp_hold_ramp \
+  --flow-low 10 --flow-high 80 \
+  --ramp-up-s 30 --hold-s 60 --ramp-down-s 30
+
+# Pulsatile flow simulation profile
+PYTHONPATH=src python3 -m perfusion.cli \
+  --diameter-mm 14.5 --pitch-mm 8 --microsteps 16 \
+  --profile pulsatile \
+  --base-flow 10 --peak-flow 120 \
+  --cycle-s 2.0 --cycles 30 --duty-cycle 0.4
 ```
 
-Python 3.10+. The host tool has no hardware dependency.
+Python 3.10+. The host tool has no hardware dependency. Generated scripts are strictly validated against firmware opcodes and bounds before emission.
 
 `hardware/syringe_carriage.scad` is parametric. Measure the barrel and the leadscrew nut before printing. OpenSCAD is not required to run the tests.
 

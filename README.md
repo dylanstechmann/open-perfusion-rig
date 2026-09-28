@@ -56,6 +56,10 @@ replace or cancel an active run. A future transport must wait for `OK DONE`
 after each RUN before proceeding. The current Python CLI only prints/simulates;
 it is not that transport.
 
+The [current serial state and replies](docs/SERIAL_TURN_TAKING.md) are documented
+for review. Configuration commands have no success acknowledgement, and
+`OK DONE` reports elapsed run time rather than measured delivery.
+
 Host-side validation is stricter than the current sketch and does not protect
 commands sent directly to it. The sketch was not changed or hardware-tested
 in this revision. The simulator models ideal signed displacement, not pulse

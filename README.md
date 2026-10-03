@@ -6,7 +6,7 @@ The printed part pushes a plunger. Medium stays in a sterile disposable syringe 
 
 ## Non-goals
 
-- Not an infusion pump. Not for animals or people. The firmware refuses flows above 2000 µL/min.
+- Not an infusion pump. Not for animals or people. The host and firmware reject flows above 2000 µL/min and nonzero flows below 0.01 µL/min, where the firmware disables the motor. These software bounds do not establish delivered-flow accuracy.
 - Not a biosafety cabinet, incubator, or autoclave.
 - Not a measured calibration of your syringe. Catalog inner diameters are a starting guess. `diameter_from_water_mass` turns a gravimetric extrusion (mg of water, mm of travel) into a diameter using an approximate default density of 1 mg/µL or a supplied measured density.
 
@@ -76,9 +76,16 @@ The [current serial state and replies](docs/SERIAL_TURN_TAKING.md) are documente
 for review. Configuration commands have no success acknowledgement, and
 `OK DONE` reports elapsed run time rather than measured delivery.
 
-Host-side validation is stricter than the current sketch and does not protect
-commands sent directly to it. The sketch was not changed or hardware-tested
-in this revision. The simulator models ideal signed displacement, not pulse
-quantization, backlash, pressure, occlusion, evaporation or delivered volume.
-Firmware hardening, board compilation and physical commissioning remain open
-work. The code is not a validated hardware controller.
+Host and sketch validation now reject malformed/non-finite
+arguments, invalid arity, fractional microstep values, overlong runs, and
+requested step intervals shorter than its four-microsecond STEP pulse or longer
+than the 32-bit timer range. The host simulator applies the same interval
+bounds. A native `g++` harness compiles the actual `.ino` against fake serial,
+clock and pin functions to exercise parser, completion, and step-pulse behavior;
+it is not an Arduino board build or a hardware test.
+
+No board toolchain or physical delivery trace was available for this revision.
+The simulator models ideal signed displacement, not pulse quantization,
+backlash, pressure, occlusion, evaporation or delivered volume. Board-specific
+timing/geometry validation and physical commissioning remain open. The code is
+not a validated hardware controller.

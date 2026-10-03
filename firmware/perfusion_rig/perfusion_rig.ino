@@ -9,11 +9,18 @@
 //   EN   -> pin 4 (driver enable, active low on most pololu-style boards)
 // Use a commercial enclosed 12 V supply. Do not wire mains.
 
+#include <math.h>
+#include <stdlib.h>
+
 const int STEP_PIN = 2;
 const int DIR_PIN = 3;
 const int EN_PIN = 4;
 const float FULL_STEPS = 200.0f;
 const float MAX_FLOW = 2000.0f;
+const float MIN_NONZERO_FLOW = 0.01f;
+const float MIN_STEP_INTERVAL_US = 4.0f; // STEP pulse is held HIGH for four microseconds.
+const float MAX_STEP_INTERVAL_US = 4294967040.0f; // Float-safe margin below 32-bit micros overflow.
+const float MAX_RUN_SECONDS = 86400.0f;
 
 float diameterMm = 14.5f;
 float pitchMm = 8.0f;
@@ -30,18 +37,51 @@ float ulPerRevolution() {
   return 3.14159265f * radius * radius * pitchMm;
 }
 
-void applyFlow(float flow) {
-  flowUlPerMin = flow;
-  if (fabs(flow) < 0.01f) {
+bool applyFlow(float flow) {
+  if (flow == 0.0f) {
+    flowUlPerMin = 0.0f;
     stepIntervalUs = 0;
     digitalWrite(EN_PIN, HIGH);
-    return;
+    return true;
   }
-  digitalWrite(DIR_PIN, flow > 0 ? HIGH : LOW);
+  float volumePerRev = ulPerRevolution();
   float ulPerS = fabs(flow) / 60.0f;
-  float stepsPerS = (ulPerS / ulPerRevolution()) * FULL_STEPS * microsteps;
-  stepIntervalUs = (unsigned long)(1000000.0f / stepsPerS);
+  float stepsPerS = (ulPerS / volumePerRev) * FULL_STEPS * microsteps;
+  double intervalUs = 1000000.0 / (double)stepsPerS;
+  if (!isfinite(volumePerRev) || volumePerRev <= 0.0f ||
+      !isfinite(stepsPerS) || stepsPerS <= 0.0f ||
+      !isfinite(intervalUs) || intervalUs < MIN_STEP_INTERVAL_US ||
+      intervalUs > MAX_STEP_INTERVAL_US) {
+    flowUlPerMin = 0.0f;
+    stepIntervalUs = 0;
+    digitalWrite(EN_PIN, HIGH);
+    return false;
+  }
+  flowUlPerMin = flow;
+  digitalWrite(DIR_PIN, flow > 0 ? HIGH : LOW);
+  stepIntervalUs = (unsigned long)intervalUs;
   digitalWrite(EN_PIN, LOW);
+  return true;
+}
+
+bool parseFiniteValue(String token, float *value) {
+  token.trim();
+  if (token.length() == 0) return false;
+  const char *text = token.c_str();
+  char *end = NULL;
+  double parsed = strtod(text, &end);
+  if (end == text || *end != '\0' || !isfinite(parsed) ||
+      parsed > 3.402823466e+38 || parsed < -3.402823466e+38) return false;
+  *value = (float)parsed;
+  return isfinite(*value);
+}
+
+bool hasInternalWhitespace(String token) {
+  const char *text = token.c_str();
+  for (size_t i = 0; i < token.length(); i++) {
+    if (text[i] == ' ' || text[i] == '\t' || text[i] == '\r' || text[i] == '\n') return true;
+  }
+  return false;
 }
 
 void handleLine(String line) {
@@ -50,7 +90,16 @@ void handleLine(String line) {
   int space = line.indexOf(' ');
   String op = (space < 0 ? line : line.substring(0, space));
   op.toUpperCase();
-  float value = (space < 0) ? 0.0f : line.substring(space + 1).toFloat();
+  String argument = (space < 0) ? String("") : line.substring(space + 1);
+  bool takesValue = (op == "DIA" || op == "PITCH" || op == "MICRO" || op == "FLOW" || op == "RUN");
+  bool takesNoArguments = (op == "STOP" || op == "STATUS");
+  if (!takesValue && !takesNoArguments) { Serial.println("ERR command"); return; }
+  if (takesNoArguments && argument.length() != 0) { Serial.println("ERR arity"); return; }
+  float value = 0.0f;
+  if (takesValue && (space < 0 || !parseFiniteValue(argument, &value))) {
+    Serial.println(hasInternalWhitespace(argument) ? "ERR arity" : "ERR number");
+    return;
+  }
   if (op == "DIA") {
     if (value < 1.0f || value > 40.0f) { Serial.println("ERR diameter"); return; }
     diameterMm = value;
@@ -58,14 +107,23 @@ void handleLine(String line) {
     if (value <= 0.0f) { Serial.println("ERR pitch"); return; }
     pitchMm = value;
   } else if (op == "MICRO") {
-    int m = (int)value;
-    if (!(m == 1 || m == 2 || m == 4 || m == 8 || m == 16)) { Serial.println("ERR micro"); return; }
-    microsteps = m;
+    if (!(value == 1.0f || value == 2.0f || value == 4.0f || value == 8.0f || value == 16.0f)) { Serial.println("ERR micro"); return; }
+    microsteps = (int)value;
   } else if (op == "FLOW") {
     if (fabs(value) > MAX_FLOW) { Serial.println("ERR flow cap"); return; }
-    applyFlow(value);
+    if (value != 0.0f && fabs(value) < MIN_NONZERO_FLOW) {
+      running = false;
+      applyFlow(0);
+      Serial.println("ERR flow below motor deadband");
+      return;
+    }
+    if (!applyFlow(value)) {
+      running = false;
+      Serial.println("ERR step interval");
+      return;
+    }
   } else if (op == "RUN") {
-    if (value <= 0.0f) { Serial.println("ERR run"); return; }
+    if (value <= 0.0f || value > MAX_RUN_SECONDS) { Serial.println("ERR run"); return; }
     running = true;
     runUntilMs = millis() + (unsigned long)(value * 1000.0f);
   } else if (op == "STOP") {
@@ -77,8 +135,6 @@ void handleLine(String line) {
     Serial.println(flowUlPerMin);
     Serial.print("steps ");
     Serial.println(stepCount);
-  } else {
-    Serial.println("ERR command");
   }
 }
 

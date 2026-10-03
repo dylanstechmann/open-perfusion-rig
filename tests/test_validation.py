@@ -24,3 +24,23 @@ class ValidationTests(unittest.TestCase):
     def test_wire_rounding_cannot_make_run_zero(self):
         with self.assertRaises(PumpError):
             encode(14.5, 8, 16, [Segment(0.00001, 50)])
+
+    def test_host_rejects_nonzero_flow_below_firmware_deadband(self):
+        for flow in [0.009999, -0.009999, 0.005, -0.005]:
+            with self.assertRaisesRegex(PumpError, "firmware disables the motor"):
+                Segment(10, flow)
+            with self.assertRaisesRegex(PumpError, "below 0.01"):
+                simulate(f"DIA 14.5\nPITCH 8\nMICRO 16\nFLOW {flow}\nRUN 10\n")
+
+    def test_zero_and_deadband_boundary_keep_firmware_semantics(self):
+        self.assertEqual(simulate("DIA 14.5\nPITCH 8\nMICRO 16\nFLOW 0\nRUN 10\n")["volume_ul"], 0)
+        self.assertGreater(
+            simulate("DIA 14.5\nPITCH 8\nMICRO 16\nFLOW 0.01\nRUN 10\n")["volume_ul"],
+            0,
+        )
+
+    def test_host_rejects_step_rates_the_firmware_cannot_schedule(self):
+        with self.assertRaisesRegex(PumpError, "four-microsecond STEP pulse"):
+            simulate("DIA 1\nPITCH 0.00001\nMICRO 16\nFLOW 2000\nRUN 1\n")
+        with self.assertRaisesRegex(PumpError, "32-bit timer range"):
+            simulate("DIA 40\nPITCH 1e38\nMICRO 16\nFLOW 0.01\nRUN 1\n")

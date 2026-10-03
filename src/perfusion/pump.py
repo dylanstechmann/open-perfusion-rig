@@ -11,6 +11,9 @@ from dataclasses import dataclass
 
 FULL_STEPS = 200
 MAX_FLOW_UL_PER_MIN = 2000.0
+MIN_NONZERO_FLOW_UL_PER_MIN = 0.01
+MIN_STEP_INTERVAL_US = 4.0  # Firmware emits a four-microsecond STEP pulse.
+MAX_STEP_INTERVAL_US = 4_294_967_040.0  # Float-safe margin below the 32-bit timer limit.
 MAX_RUN_SECONDS = 86400.0
 
 
@@ -55,6 +58,11 @@ class Segment:
         if not math.isfinite(self.flow_ul_per_min) or abs(self.flow_ul_per_min) > MAX_FLOW_UL_PER_MIN:
             raise PumpError(
                 f"flow {self.flow_ul_per_min} µL/min exceeds the {MAX_FLOW_UL_PER_MIN:g} µL/min cap"
+            )
+        if 0 < abs(self.flow_ul_per_min) < MIN_NONZERO_FLOW_UL_PER_MIN:
+            raise PumpError(
+                f"nonzero flow must be at least {MIN_NONZERO_FLOW_UL_PER_MIN:g} µL/min; "
+                "the firmware disables the motor below this threshold"
             )
 
 
@@ -216,11 +224,22 @@ def simulate(script: str) -> dict:
             flow = float(parts[1])
             if abs(flow) > MAX_FLOW_UL_PER_MIN:
                 raise PumpError("firmware cap: flow too high")
+            if 0 < abs(flow) < MIN_NONZERO_FLOW_UL_PER_MIN:
+                raise PumpError("firmware disables the motor below 0.01 µL/min")
         elif op == "RUN" and len(parts) == 2:
             if None in (diameter, pitch, micro):
                 raise PumpError("DIA, PITCH, and MICRO are required before RUN")
             duration = float(parts[1])
             Segment(duration, flow)
+            if flow != 0:
+                steps_per_second = abs(steps_for_volume(flow / 60.0, diameter, pitch, micro))
+                if not math.isfinite(steps_per_second) or steps_per_second <= 0:
+                    raise PumpError("requested geometry does not produce a finite firmware step interval")
+                interval_us = 1_000_000.0 / steps_per_second
+                if interval_us < MIN_STEP_INTERVAL_US:
+                    raise PumpError("requested flow exceeds the firmware's four-microsecond STEP pulse limit")
+                if interval_us > MAX_STEP_INTERVAL_US:
+                    raise PumpError("requested step interval exceeds the firmware's 32-bit timer range")
             delta = duration / 60.0 * flow
             volume += delta
             steps += steps_for_volume(delta, diameter, pitch, micro)

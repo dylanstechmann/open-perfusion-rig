@@ -52,8 +52,11 @@ class FakeSerial {
   int available() const { return static_cast<int>(input_.size() - read_pos_); }
   char read() { return input_[read_pos_++]; }
   void feed(const std::string &input) { input_ += input; }
+  void feedNext(const std::string &input) { input_ = input; read_pos_ = 0; }
+  void reset() { input_.clear(); read_pos_ = 0; output_.clear(); }
   void clearOutput() { output_.clear(); }
   const std::string &output() const { return output_; }
+  size_t findOutput(const std::string &needle, size_t pos = 0) const { return output_.find(needle, pos); }
 
   template <typename T>
   void print(const T &value) {

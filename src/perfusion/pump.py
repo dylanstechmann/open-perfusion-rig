@@ -14,6 +14,7 @@ MAX_FLOW_UL_PER_MIN = 2000.0
 MIN_NONZERO_FLOW_UL_PER_MIN = 0.01
 MIN_STEP_INTERVAL_US = 4.0  # Firmware emits a four-microsecond STEP pulse.
 MAX_STEP_INTERVAL_US = 4_294_967_040.0  # Float-safe margin below the 32-bit timer limit.
+MIN_RUN_SECONDS = 0.001  # Firmware run clock resolves milliseconds.
 MAX_RUN_SECONDS = 86400.0
 
 
@@ -53,8 +54,8 @@ class Segment:
     flow_ul_per_min: float
 
     def __post_init__(self):
-        if not math.isfinite(self.duration_s) or not 0 < self.duration_s <= MAX_RUN_SECONDS:
-            raise PumpError("duration must be finite, positive and at most 86400 seconds")
+        if not math.isfinite(self.duration_s) or not MIN_RUN_SECONDS <= self.duration_s <= MAX_RUN_SECONDS:
+            raise PumpError("duration must be finite and between 0.001 and 86400 seconds")
         if not math.isfinite(self.flow_ul_per_min) or abs(self.flow_ul_per_min) > MAX_FLOW_UL_PER_MIN:
             raise PumpError(
                 f"flow {self.flow_ul_per_min} µL/min exceeds the {MAX_FLOW_UL_PER_MIN:g} µL/min cap"

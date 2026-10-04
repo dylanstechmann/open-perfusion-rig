@@ -58,6 +58,21 @@ class FirmwareHarnessTests(unittest.TestCase):
     def test_firmware_reports_run_completion_and_disables_driver(self):
         self.run_scenario("complete-run")
 
+    def test_firmware_turn_taking_waits_for_each_run_completion(self):
+        self.run_scenario("wait-for-completion")
+
+    def test_run_completion_survives_32bit_millisecond_rollover(self):
+        self.run_scenario("run-clock-rollover")
+
+    def test_step_schedule_survives_32bit_microsecond_rollover(self):
+        self.run_scenario("step-clock-rollover")
+
+    def test_new_run_waits_a_full_interval_after_idle(self):
+        self.run_scenario("fresh-run-pulse-baseline")
+
+    def test_firmware_rejects_submillisecond_run(self):
+        self.run_scenario("reject-submillisecond-run")
+
     def test_firmware_emits_one_bounded_step_pulse(self):
         self.run_scenario("step-pulse")
 

@@ -9,6 +9,7 @@
 //   EN   -> pin 4 (driver enable, active low on most pololu-style boards)
 // Use a commercial enclosed 12 V supply. Do not wire mains.
 
+#include <stdint.h>
 #include <math.h>
 #include <stdlib.h>
 
@@ -20,15 +21,17 @@ const float MAX_FLOW = 2000.0f;
 const float MIN_NONZERO_FLOW = 0.01f;
 const float MIN_STEP_INTERVAL_US = 4.0f; // STEP pulse is held HIGH for four microseconds.
 const float MAX_STEP_INTERVAL_US = 4294967040.0f; // Float-safe margin below 32-bit micros overflow.
+const float MIN_RUN_SECONDS = 0.001f; // The run clock resolves whole milliseconds.
 const float MAX_RUN_SECONDS = 86400.0f;
 
 float diameterMm = 14.5f;
 float pitchMm = 8.0f;
 int microsteps = 16;
 float flowUlPerMin = 0.0f;
-unsigned long stepIntervalUs = 0;
-unsigned long lastStepUs = 0;
-unsigned long runUntilMs = 0;
+uint32_t stepIntervalUs = 0;
+uint32_t lastStepUs = 0;
+uint32_t runStartedMs = 0;
+uint32_t runDurationMs = 0;
 bool running = false;
 long stepCount = 0;
 
@@ -59,7 +62,7 @@ bool applyFlow(float flow) {
   }
   flowUlPerMin = flow;
   digitalWrite(DIR_PIN, flow > 0 ? HIGH : LOW);
-  stepIntervalUs = (unsigned long)intervalUs;
+  stepIntervalUs = (uint32_t)intervalUs;
   digitalWrite(EN_PIN, LOW);
   return true;
 }
@@ -123,9 +126,13 @@ void handleLine(String line) {
       return;
     }
   } else if (op == "RUN") {
-    if (value <= 0.0f || value > MAX_RUN_SECONDS) { Serial.println("ERR run"); return; }
+    if (value < MIN_RUN_SECONDS || value > MAX_RUN_SECONDS) { Serial.println("ERR run"); return; }
     running = true;
-    runUntilMs = millis() + (unsigned long)(value * 1000.0f);
+    // Explicit 32-bit elapsed arithmetic matches the MCU on host builds too.
+    runStartedMs = (uint32_t)millis();
+    runDurationMs = (uint32_t)(value * 1000.0f);
+    // Idle time is not part of the next run's first pulse interval.
+    lastStepUs = (uint32_t)micros();
   } else if (op == "STOP") {
     running = false;
     applyFlow(0);
@@ -158,14 +165,14 @@ void loop() {
       buffer += c;
     }
   }
-  if (running && (long)(millis() - runUntilMs) >= 0) {
+  if (running && (uint32_t)((uint32_t)millis() - runStartedMs) >= runDurationMs) {
     running = false;
     applyFlow(0);
     Serial.println("OK DONE");
   }
   if (running && stepIntervalUs > 0) {
-    unsigned long now = micros();
-    if ((unsigned long)(now - lastStepUs) >= stepIntervalUs) {
+    uint32_t now = (uint32_t)micros();
+    if ((uint32_t)(now - lastStepUs) >= stepIntervalUs) {
       lastStepUs = now;
       digitalWrite(STEP_PIN, HIGH);
       delayMicroseconds(4);

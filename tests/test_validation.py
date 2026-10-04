@@ -44,3 +44,11 @@ class ValidationTests(unittest.TestCase):
             simulate("DIA 1\nPITCH 0.00001\nMICRO 16\nFLOW 2000\nRUN 1\n")
         with self.assertRaisesRegex(PumpError, "32-bit timer range"):
             simulate("DIA 40\nPITCH 1e38\nMICRO 16\nFLOW 0.01\nRUN 1\n")
+
+    def test_host_rejects_runs_shorter_than_firmware_clock_resolution(self):
+        for duration in [0.0001, 0.000999]:
+            with self.subTest(duration=duration), self.assertRaises(PumpError):
+                Segment(duration, 60)
+            with self.assertRaises(PumpError):
+                simulate(f"DIA 14.5\nPITCH 8\nMICRO 16\nFLOW 60\nRUN {duration}\n")
+        self.assertEqual(Segment(0.001, 60).duration_s, 0.001)

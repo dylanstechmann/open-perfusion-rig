@@ -27,3 +27,11 @@ The host simulator assumes completed sequential commands and ideal signed
 displacement. The sketch has no measured flow feedback, occlusion detection,
 pressure limit, or validated pulse-volume calibration. It is not an infusion
 pump and is not for animals or people.
+
+Run timers and pulse clocks use explicit 32-bit elapsed arithmetic. Each RUN
+starts its pulse baseline at the command time, so a long preceding idle period
+does not create an immediate pulse. RUN duration must be at least 0.001 seconds
+and is converted to whole milliseconds; submillisecond precision is unsupported.
+Native harness regressions cover clock rollover and sequential completion. These
+checks do not establish timing accuracy, serial latency, or delivered volume on
+a physical board.

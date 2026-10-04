@@ -54,8 +54,8 @@ MIT for the code and the OpenSCAD. You still have to follow the syringe, driver,
 ## Host validation and measurement (v0.2)
 
 Install with `python -m pip install -e .`. The host rejects NaN/infinity, invalid
-command arity, unsupported microsteps, nonpositive runs and runs longer than
-86,400 seconds. Encoding also checks values after text rounding. Each simulated
+command arity, unsupported microsteps, runs below the one-millisecond clock
+resolution and runs longer than 86,400 seconds. Encoding also checks values after text rounding. Each simulated
 RUN clears the flow on completion, matching that part of the firmware state.
 
 `diameter_from_water_mass(..., density_mg_ul=...)` supports a supplied density.
@@ -81,10 +81,12 @@ arguments, invalid arity, fractional microstep values, overlong runs, and
 requested step intervals shorter than its four-microsecond STEP pulse or longer
 than the 32-bit timer range. The host simulator applies the same interval
 bounds. A native `g++` harness compiles the actual `.ino` against fake serial,
-clock and pin functions to exercise parser, completion, and step-pulse behavior;
+clock and pin functions to exercise parser, turn-taking, completion, pulse
+phase after idle, and 32-bit millisecond/microsecond rollover behavior;
 it is not an Arduino board build or a hardware test.
 
-No board toolchain or physical delivery trace was available for this revision.
+The sketch has not been hardware-tested. No board toolchain or physical
+delivery trace was available for this revision.
 The simulator models ideal signed displacement, not pulse quantization,
 backlash, pressure, occlusion, evaporation or delivered volume. Board-specific
 timing/geometry validation and physical commissioning remain open. The code is

@@ -1,5 +1,7 @@
 # Open perfusion rig
 
+This is a personal hobby and learning project, developed with substantial assistance from AI coding tools.
+
 Math, a text protocol, Arduino-style firmware, and a parametric plunger carriage for a **syringe pusher** used on in-vitro perfusion (organoids, tissue chips).
 
 The printed part pushes a plunger. Medium stays in a sterile disposable syringe and purchased tubing. A 0.22 µm filter belongs in that line if the fluid is going into a culture. PLA is not a sterile fluid path, and ethanol wiped on a print is not sterilization.

@@ -10,6 +10,35 @@ The printed part pushes a plunger. Medium stays in a sterile disposable syringe 
 - Not a biosafety cabinet, incubator, or autoclave.
 - Not a measured calibration of your syringe. Catalog inner diameters are a starting guess. `diameter_from_water_mass` turns a gravimetric extrusion (mg of water, mm of travel) into a diameter using an approximate default density of 1 mg/µL or a supplied measured density.
 
+## Discrete pulse quantization
+
+`--quantization` reports what the sketch's integer scheduling actually delivers,
+instead of the continuous integral:
+
+- the exact step interval and the `uint32_t` value the sketch stores, which
+  **truncates** rather than rounds, so the realized step rate is never slower
+  than requested;
+- whole steps only — the final fractional step never fires;
+- the run length as whole milliseconds, since the sketch compares `millis()`
+  against `(uint32_t)(seconds * 1000)`;
+- volume per microstep, the smallest increment the rig can deliver, and the
+  resulting within-interval flow pattern.
+
+The two effects pull in opposite directions and their balance depends on flow.
+At 50 µL/min for 30 min with a 14.5 mm barrel, 8 mm pitch and 16 microsteps, the
+schedule delivers 3,633 steps — 1499.79 µL against the continuous model's 1500
+µL, −0.014%. At 10 µL/min one step takes about 2.5 s, so a 60 s run fires only
+24 steps and the unfired remainder costs −0.9%. An assumed per-pulse loop
+overhead can only reduce delivery, because the sketch can fire late but never
+early; at a 2.5 s interval 50 µs of overhead changes nothing, while at
+1500 µL/min it removes steps.
+
+This is scheduling arithmetic, not a measured volume. Motor acceleration,
+pull-out torque, missed steps, backlash, compliance, pressure, occlusion and
+leaks are still not modeled, and no hardware was operated. Gravimetric
+measurement belongs in
+[perfusion-calibration-lab](https://github.com/dylanstechmann/perfusion-calibration-lab).
+
 ## What is tested
 
 Cylinder volume, inversion of that calibration, and that a script's integrated volume matches the step count the host simulator computes from the same diameter, pitch, and microstepping. The `.ino` implements that command set (`DIA`, `PITCH`, `MICRO`, `FLOW`, `RUN`, `STOP`, `STATUS`). The host simulator models sequential, completed commands; see the firmware transport limitation below. Flash the sketch only after you have read the pin comments and you are using a commercial enclosed 12 V supply.

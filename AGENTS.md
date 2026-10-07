@@ -10,7 +10,7 @@ above 2000 µL/min.
 - Stream `encode()` output at the sketch. It does not queue a script; a later RUN/STOP can cancel motion. A transport must wait for `OK DONE`.
 - Claim a physical calibration. Catalog diameter is a guess. Gravimetric analysis belongs in `perfusion-calibration-lab`.
 - Raise the flow ceiling or aim this at animals or people.
-- Pretend the simulator includes backlash, pressure, occlusion, or pulse quantization.
+- Pretend the simulator includes backlash, pressure, occlusion, motor dynamics, or missed steps. Pulse quantization *is* now modeled (`--quantization`): uint32 interval truncation, whole steps, and the millisecond run clock, taken from the sketch's arithmetic. Nothing else is.
 
 ## First commands
 

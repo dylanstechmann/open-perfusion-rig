@@ -16,6 +16,7 @@ from perfusion.pump import (
     simulate,
     validate_firmware_commands,
 )
+from perfusion.quantization import quantization_report
 
 
 def main(argv=None) -> int:
@@ -48,6 +49,11 @@ def main(argv=None) -> int:
     parser.add_argument("--cycle-s", type=float, default=2.0, help="pulsatile cycle duration in seconds (default: 2.0)")
     parser.add_argument("--cycles", type=int, default=20, help="number of pulsatile cycles (default: 20)")
     parser.add_argument("--duty-cycle", type=float, default=0.5, help="pulsatile duty cycle (0-1, default: 0.5)")
+    parser.add_argument("--quantization", action="store_true",
+                        help="report the sketch's integer step scheduling: interval truncation, "
+                             "whole steps and the millisecond run clock")
+    parser.add_argument("--loop-overhead-us", type=float, default=0.0,
+                        help="assumed fixed per-pulse loop delay in microseconds (default: 0, ideal)")
 
     args = parser.parse_args(argv)
 
@@ -79,6 +85,12 @@ def main(argv=None) -> int:
         script = encode(args.diameter_mm, args.pitch_mm, args.microsteps, segments)
         validated_lines = validate_firmware_commands(script)
         sim_res = simulate(script)
+        quantization = None
+        if args.quantization:
+            quantization = quantization_report(
+                segments, args.diameter_mm, args.pitch_mm, args.microsteps,
+                loop_overhead_us=args.loop_overhead_us,
+            )
     except PumpError as exc:
         parser.error(str(exc))
 
@@ -89,6 +101,7 @@ def main(argv=None) -> int:
         "delivered_ul": round(delivered_ul(segments), 4),
         "simulation": sim_res,
         "validated_command_count": len(validated_lines),
+        **({"quantization": quantization} if quantization is not None else {}),
         "script": script,
         "fluid_path": "sterile syringe and purchased tubing only; the printed carriage pushes the plunger",
     }

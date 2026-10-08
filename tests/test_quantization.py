@@ -74,6 +74,21 @@ class QuantizedRunTests(unittest.TestCase):
         self.assertLess(result["delivered_ul"], result["continuous_model_ul"])
         self.assertAlmostEqual(result["relative_volume_error"], -1.381e-4, delta=1e-6)
 
+    def test_integrated_volume_is_steps_times_step_volume_across_a_grid(self):
+        # Independent integer arithmetic: truncated interval in whole microseconds, run length in
+        # whole milliseconds, whole steps only. Delivered volume must equal steps x one microstep.
+        for microsteps in (1, 4, 16):
+            per_step = volume_per_step_ul(DIAMETER_MM, PITCH_MM, microsteps)
+            for flow in (20.0, 50.0, 117.0, -33.0):
+                for duration in (7.3, 60.0, 601.0):
+                    result = quantized_run(flow, duration, DIAMETER_MM, PITCH_MM, microsteps)
+                    exact_us = per_step / (abs(flow) / 60.0) * 1_000_000.0
+                    stored_us = math.floor(exact_us)
+                    expected_steps = (int(duration * 1000.0) * 1000) // stored_us
+                    self.assertEqual(result["steps_delivered"], expected_steps)
+                    self.assertAlmostEqual(result["delivered_ul"],
+                                           math.copysign(expected_steps * per_step, flow), places=9)
+
     def test_negative_flow_delivers_negative_volume_with_the_same_step_count(self):
         forward = quantized_run(50.0, 600.0, DIAMETER_MM, PITCH_MM, MICROSTEPS)
         reverse = quantized_run(-50.0, 600.0, DIAMETER_MM, PITCH_MM, MICROSTEPS)
